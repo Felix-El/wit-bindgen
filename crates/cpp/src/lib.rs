@@ -16,7 +16,7 @@ use wit_bindgen_core::{
     wit_parser::{
         Alignment, ArchitectureSize, Docs, Function, FunctionKind, Handle, Int, InterfaceId,
         Resolve, SizeAlign, Stability, Type, TypeDef, TypeDefKind, TypeId, TypeOwner, WorldId,
-        WorldKey,
+        WorldItem, WorldKey,
     },
     Files, InterfaceGenerator, Source, Types, WorldGenerator,
 };
@@ -724,16 +724,43 @@ fn namespace(resolve: &Resolve, owner: &TypeOwner, guest_export: bool, opts: &Op
         TypeOwner::World(w) => result.push(resolve.worlds[*w].name.to_snake_case()),
         TypeOwner::Interface(i) => {
             let iface = &resolve.interfaces[*i];
-            let pkg = &resolve.packages[iface.package.unwrap()];
-            result.push(pkg.name.namespace.to_snake_case());
-            result.push(pkg.name.name.to_snake_case());
             if let Some(name) = &iface.name {
+                let pkg = &resolve.packages[iface.package.unwrap()];
+                result.push(pkg.name.namespace.to_snake_case());
+                result.push(pkg.name.name.to_snake_case());
                 result.push(name.to_snake_case());
+            } else {
+                find_interface_name(*i, resolve)
+                    .map(|(wid, name)| {
+                        result.push(resolve.worlds[wid].name.to_snake_case());
+                        result.push(name.to_snake_case());
+                    })
+                    .expect("No world mentions the interface!");
             }
         }
         TypeOwner::None => (),
     }
     result
+}
+
+fn find_interface_name(iid: InterfaceId, resolve: &Resolve) -> Option<(WorldId, String)> {
+    // Below process only applies to unnamed interfaces, as only those are
+    // limited to a single world due to their inline (anonymous) nature.
+    // Named interfaces can be imported/exported more than once.
+    assert!(resolve.interfaces[iid].name.is_none());
+
+    for (wid, world) in &resolve.worlds {
+        let ports = world.imports.iter().chain(world.exports.iter());
+        for key_item in ports {
+            match key_item {
+                (WorldKey::Name(name), WorldItem::Interface { id, .. }) if *id == iid => {
+                    return Some((wid, name.clone()))
+                }
+                _ => {}
+            }
+        }
+    }
+    None
 }
 
 impl SourceWithState {
